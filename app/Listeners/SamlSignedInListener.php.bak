@@ -1,0 +1,94 @@
+<?php
+
+namespace App\Listeners;
+
+use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
+use Slides\Saml2\Events\SignedIn;
+
+class SamlSignedInListener
+{
+    public function handle(SignedIn $event): void
+    {
+        $messageId = $event->getAuth()->getLastMessageId();
+        $user = $event->getSaml2User();
+
+        $attributes = $user->getAttributes();
+
+        $name = $this->firstAttr($attributes, ['name', 'displayName', 'full_name', 'fullName', 'username']);
+        $email = $this->firstAttr($attributes, ['email', 'mail', 'emailAddress']);
+        $username = $this->firstAttr($attributes, ['username', 'preferred_username', 'uid', 'UserName']);
+
+        $groups = $this->normalizeGroups(
+            $this->collectAttr($attributes, ['groups', 'group', 'memberOf'])
+        );
+
+        $availableRoles = collect($groups)
+            ->filter(fn ($g) => Str::startsWith($g, 'role-'))
+            ->map(fn ($g) => Str::after($g, 'role-'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $currentRole = $availableRoles[0] ?? 'general';
+
+        $portalUser = [
+            'message_id' => $messageId,
+            'name' => $name ?: ($username ?: 'Unknown User'),
+            'email' => $email,
+            'username' => $username,
+            'groups' => $groups,
+            'available_roles' => $availableRoles,
+            'current_role' => $currentRole,
+            'raw' => $attributes,
+        ];
+
+        session([
+            'portal_user_raw' => $portalUser,
+        ]);
+
+        if (! in_array('app-web', $groups, true)) {
+            session([
+                'portal_user_forbidden' => $portalUser,
+            ]);
+            return;
+        }
+
+        session([
+            'portal_user' => $portalUser,
+        ]);
+    }
+
+    private function firstAttr(array $attributes, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            if (isset($attributes[$key]) && is_array($attributes[$key]) && isset($attributes[$key][0])) {
+                return trim((string) $attributes[$key][0]);
+            }
+        }
+
+        return null;
+    }
+
+    private function collectAttr(array $attributes, array $keys): array
+    {
+        foreach ($keys as $key) {
+            if (isset($attributes[$key]) && is_array($attributes[$key])) {
+                return $attributes[$key];
+            }
+        }
+
+        return [];
+    }
+
+    private function normalizeGroups(array $groups): array
+    {
+        return collect($groups)
+            ->map(fn ($g) => trim(trim((string) $g), '/'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+}

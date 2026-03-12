@@ -1,0 +1,10 @@
+.git
+.gitignore
+node_modules
+vendor
+storage/logs/*
+bootstrap/cache/*
+tests
+.env
+docker
+k8s
