@@ -64,9 +64,15 @@ class SamlSignedInListener
             'groups' => $groups,
         ]);
 
-        $hasAppWebAccess = $this->hasAppWebAccess($groups);
-        $availableRoles = $this->extractAppWebRolesFromGroups($groups);
-        $currentRole = $this->pickDefaultRole($availableRoles);
+        $availableRoles = collect($groups)
+            ->filter(fn ($g) => Str::startsWith($g, 'role-'))
+            ->map(fn ($g) => Str::after($g, 'role-'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $currentRole = $availableRoles[0] ?? 'general';
 
         $portalUser = [
             'message_id' => $messageId,
@@ -84,7 +90,7 @@ class SamlSignedInListener
             'portal_user_raw' => $portalUser,
         ]);
 
-        if (! $hasAppWebAccess || empty($availableRoles)) {
+        if (! in_array('app-web', $groups, true)) {
             session([
                 'portal_user_forbidden' => $portalUser,
             ]);
@@ -95,8 +101,6 @@ class SamlSignedInListener
                 'email' => $email,
                 'username' => $username,
                 'groups' => $groups,
-                'has_app_web_access' => $hasAppWebAccess,
-                'available_roles' => $availableRoles,
             ]);
 
             return;
@@ -112,19 +116,7 @@ class SamlSignedInListener
             'email' => $email,
             'username' => $username,
             'groups' => $groups,
-            'has_app_web_access' => $hasAppWebAccess,
-            'available_roles' => $availableRoles,
-            'current_role' => $currentRole,
         ]);
-    }
-
-    private function hasAppWebAccess(array $groups): bool
-    {
-        return collect($groups)->contains(function ($group) {
-            $group = Str::lower(trim($group, '/'));
-
-            return $group === 'app-web' || Str::startsWith($group, 'app-web/');
-        });
     }
 
     private function firstAttr(array $attributes, array $keys): ?string
@@ -150,42 +142,6 @@ class SamlSignedInListener
         }
 
         return [];
-    }
-
-    private function extractAppWebRolesFromGroups(array $groups): array
-    {
-        return collect($groups)
-            ->map(fn ($group) => Str::lower(trim((string) $group, '/')))
-            ->map(function ($group) {
-                if (Str::startsWith($group, 'app-web/')) {
-                    $group = Str::after($group, 'app-web/');
-                }
-
-                if (str_ends_with($group, '-role-web')) {
-                    $group = substr($group, 0, -9);
-                } elseif (str_ends_with($group, '-web')) {
-                    $group = substr($group, 0, -4);
-                } else {
-                    return null;
-                }
-
-                return trim($group, '- ');
-            })
-            ->filter(fn ($role) => in_array($role, ['staff', 'student', 'alumni', 'external', 'admin', 'helpdesk'], true))
-            ->unique()
-            ->values()
-            ->all();
-    }
-
-    private function pickDefaultRole(array $availableRoles): string
-    {
-        foreach (['staff', 'admin', 'student', 'alumni', 'external', 'helpdesk', 'general'] as $role) {
-            if (in_array($role, $availableRoles, true)) {
-                return $role;
-            }
-        }
-
-        return $availableRoles[0] ?? 'general';
     }
 
     private function normalizeGroups(array $groups): array

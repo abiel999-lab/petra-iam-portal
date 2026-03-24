@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 
@@ -23,7 +22,7 @@ class KeycloakController extends Controller
 
         $raw = $socialUser->user ?? [];
         $groups = $this->normalizeGroups($raw['groups'] ?? []);
-        $availableRoles = $this->extractRolesFromGroups($groups);
+        $availableRoles = $this->extractAppWebRolesFromGroups($groups);
         $defaultRole = $this->pickDefaultRole($availableRoles);
 
         $portalUser = [
@@ -41,18 +40,20 @@ class KeycloakController extends Controller
             'id_token' => $socialUser->accessTokenResponseBody['id_token'] ?? null,
         ];
 
-        // simpan dulu context logout, bahkan jika nanti ternyata forbidden
         $request->session()->put('portal_logout', [
             'name' => $portalUser['name'],
             'email' => $portalUser['email'],
             'id_token' => $portalUser['id_token'],
         ]);
 
-        if (! in_array('app-web', $groups, true)) {
+        if (empty($availableRoles)) {
             $request->session()->forget('portal_user');
+            $request->session()->put('portal_user_forbidden', true);
+
             return redirect()->route('sso.forbidden');
         }
 
+        $request->session()->forget('portal_user_forbidden');
         $request->session()->put('portal_user', $portalUser);
 
         return redirect()->route('dashboard');
@@ -95,8 +96,7 @@ class KeycloakController extends Controller
         return collect($groups)
             ->map(function ($group) {
                 $group = trim((string) $group);
-                $group = trim($group, '/');
-                return $group;
+                return trim($group, '/');
             })
             ->filter()
             ->unique()
@@ -104,12 +104,19 @@ class KeycloakController extends Controller
             ->all();
     }
 
-    private function extractRolesFromGroups(array $groups): array
+    private function extractAppWebRolesFromGroups(array $groups): array
     {
         return collect($groups)
-            ->filter(fn ($group) => Str::startsWith($group, 'role-'))
-            ->map(fn ($group) => Str::after($group, 'role-'))
-            ->filter()
+            ->filter(fn ($group) => str_starts_with($group, 'app-web/'))
+            ->map(fn ($group) => Str::after($group, 'app-web/'))
+            ->map(fn ($role) => trim($role, '/'))
+            ->map(function ($role) {
+                if (str_ends_with($role, '-role')) {
+                    $role = substr($role, 0, -5);
+                }
+                return $role;
+            })
+            ->filter(fn ($role) => $role !== '' && !str_contains($role, '/'))
             ->unique()
             ->values()
             ->all();
@@ -117,7 +124,7 @@ class KeycloakController extends Controller
 
     private function pickDefaultRole(array $availableRoles): string
     {
-        foreach (['staff', 'admin', 'student', 'alumni', 'external', 'general'] as $role) {
+        foreach (['staff', 'admin', 'student', 'alumni', 'external', 'helpdesk', 'general'] as $role) {
             if (in_array($role, $availableRoles, true)) {
                 return $role;
             }

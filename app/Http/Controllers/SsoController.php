@@ -13,7 +13,6 @@ class SsoController extends Controller
         }
 
         return response()->view('auth.forbidden', [
-            'title' => 'Forbidden',
             'user' => session('portal_user_forbidden'),
         ], 403);
     }

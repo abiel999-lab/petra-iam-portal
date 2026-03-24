@@ -20,6 +20,6 @@ class RoleSwitchController extends Controller
 
         $request->session()->put('portal_user', $user);
 
-        return back()->with('success', 'Role berhasil diganti ke '.strtoupper($validated['role']));
+        return back()->with('success', 'Role berhasil diganti ke ' . strtoupper($validated['role']));
     }
 }
